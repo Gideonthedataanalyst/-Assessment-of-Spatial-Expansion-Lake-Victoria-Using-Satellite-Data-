@@ -1,4 +1,4 @@
-//Load the Rift Valley + Victoria shapefile as an asset and visualize it
+//Load the Victoria shapefile as an asset and visualize it
 Map.addLayer(geometry, {color: 'blue'}, 'Lake_Victoria');
 Map.centerObject(geometry, 6);
 var AOI = geometry;
