@@ -1,0 +1,118 @@
+//Load the Rift Valley + Victoria shapefile as an asset and visualize it
+Map.addLayer(geometry, {color: 'blue'}, 'Lake_Victoria');
+Map.centerObject(geometry, 6);
+var AOI = geometry;
+
+//Load the Landsat image collections for the period from 1984 ~ Present
+//For the period from 1984 ~ 2012, we use the Landsat 5 Tier 1 C2L2 SR data
+//Note that this image collection is available for the period 1984-03 ~ 2012-05
+var l5collection = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2')
+.filter(ee.Filter.lt('CLOUD_COVER',5))
+.filterBounds(AOI);
+print(l5collection);
+
+// Apply scaling factors
+function applyScaleFactors(image) {var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+var thermalBand = image.select('ST_B6').multiply(0.00341802).add(149.0);
+return image.addBands(opticalBands, null, true)
+.addBands(thermalBand, null, true);
+}
+var l5collection = l5collection.map(applyScaleFactors);
+print(l5collection);
+
+//Create annual median composites from the scaled collection
+var years = ee.List.sequence(1984, 2012);
+var l5collection = ee.ImageCollection(years
+.map(function(y) {
+var start = ee.Date.fromYMD(y, 1, 1);
+var end = start.advance(1, 'year');
+var image = l5collection.filterDate(start, end).median();
+return image.set('year', y);
+}));
+print(l5collection);
+
+//For the period from 2013 ~ Present, we use the Landsat 8 Tier 1 C2L2 SR data
+//Note that this image collection is available for the period 2013-03 ~ Present
+var years = ee.List.sequence(2013, 2023);
+var l8collection = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+.filter(ee.Filter.lt('CLOUD_COVER',5))
+.filterBounds(AOI);
+var l8collection = ee.ImageCollection(years
+.map(function(y) {
+var start = ee.Date.fromYMD(y, 1, 1);
+var end = start.advance(1, 'year');
+var image = l8collection.filterDate(start, end).median();
+return image.set('year', y);
+}));
+print(l8collection);
+
+// Applies scaling factors.
+function applyScaleFactors(image) {var opticalBands = image.select('SR_B.').multiply(0.0000275).add(-0.2);
+var thermalBands = image.select('ST_B.*').multiply(0.00341802).add(149.0);
+return image.addBands(opticalBands, null, true)
+.addBands(thermalBands, null, true);
+}
+var l8collection = l8collection.map(applyScaleFactors);
+
+
+//Merge the L5 and L8 collections
+var collection_merge = ee.ImageCollection(l5collection.merge(l8collection));
+print (collection_merge)
+//Export a list of the images for each of the collections
+Export.table.toDrive({
+collection: l5collection,
+folder: 'RS_Prac_2023',
+description:'L5_RV_Collection',
+fileFormat: 'CSV'
+});
+Export.table.toDrive({
+collection: l8collection,
+folder: 'RS_Prac_2023',
+description:'L8_RV_Collection',
+fileFormat: 'CSV'
+});
+
+
+//Remove any images which did not meet cloud threshold and therefore returned 0 bands
+//From inspecting the previous collection, each image should have 19 bands
+var nullimages = l5collection
+.map(function(image) {
+return image.set('count', image.bandNames().length());
+})
+.filter(ee.Filter.eq('count', 19));
+print(nullimages, "Non-null Landsat 4-5 Collection");
+
+
+
+//The function to remove null images can also be applied to the merged collection
+var nullimages = collection_merge
+.map(function(image) {
+return image.set('count', image.bandNames().length());
+})
+.filter(ee.Filter.eq('count', 19));
+print(nullimages, "Non-null Landsat 4-5 & Landsat 8 Collection");
+
+
+
+// This function adds NDWI (water index) band to a Landsat 8 image.
+var addNDWI = function(image) {
+return image
+.addBands(image
+.normalizedDifference(['SR_B3', 'SR_B5'])
+.rename('NDWI'));
+};
+// Add NDWI to the collection
+var l8ndwi = l8collection
+.select(['SR_B3', 'SR_B5'])
+.map(addNDWI);
+print(l8ndwi);
+var l8ndwi = l8ndwi.select('NDWI');
+var waterOnly = l8ndwi.map(function(img){
+// selfMask() is important as it will mask all 0 values
+// Otherwise it will still count as a valid pixel
+return img.gt(0).selfMask().clip(geometry);
+});
+print(waterOnly, 'Water Mask');
+Map.addLayer(waterOnly, {bands: 'NDWI', min: 0, max:1, palette: ['darkblue']}, 'Lake_Victoria');
+
+
